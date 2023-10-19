@@ -1,0 +1,17 @@
+frontend:
+  replicaCount: 1
+  image:
+    repository: nacromancer858/frontend-image-777
+    tag: 1.0
+  service:
+    type: NodePort
+    port: 80
+    targetPort: 80
+    nodePort: 30177
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "200m"
+      memory: "256Mi"

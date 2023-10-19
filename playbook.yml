@@ -1,0 +1,196 @@
+- name: Install and start Minikube
+  hosts: localhost
+  become: true
+  gather_facts: false
+  tasks:
+  - name: Install dependencies
+    apt:
+      name:
+      - curl
+      - virtualbox
+      - conntrack
+      - libvirt-clients
+      - libvirt-daemon-system
+
+  - name: Download and install Minikube
+    block:
+    - name: Download Minikube
+      get_url:
+        url: "https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64"
+        dest: "/usr/local/bin/minikube"
+        mode: 0755
+        validate_certs: no
+
+    - name: Add Minikube to the PATH
+      lineinfile:
+        dest: "$HOME/.bashrc"
+        line: 'export PATH=/usr/local/bin:$PATH'
+        insertafter: EOF
+      become: false
+
+  - name: Start Minikube
+    shell: minikube start
+    args:
+      executable: /bin/bash
+      creates: "$HOME/.kube/config"
+
+  handlers:
+  - name: Restart shell
+    shell: exec $SHELL
+
+
+- name: Install and configure Kubernetes with Minikube
+  hosts: localhost
+  connection: local
+  become: true
+  tasks:
+  - name: Install Docker
+    snap:
+      name: docker
+
+  - name: Install Docker.io package
+    apt:
+      name: docker.io
+      state: present
+      # update_cache: yes
+
+  - name: Start Docker service
+    service:
+      name: docker
+      state: started
+
+  - name: Download kubectl
+    shell: |
+      curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+
+  - name: Verify kubectl integrity
+    shell: |
+      curl -LO "https://dl.k8s.io/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
+      echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+
+  - name: Install kubectl
+    shell: |
+      sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+
+- name: Login to Docker Hub & Build Docker Images
+  hosts: localhost
+  gather_facts: false
+  vars:
+    inventory_file: "inventory.yml"
+  tasks:
+
+  - name: Load inventory file
+    include_vars:
+      file: "{{ inventory_file }}"
+
+  - name: Change Directory to Simple-crud-react-nodejs
+    shell: cd /home/saurabhadhau/Desktop/P-2/simple-crud-react-nodejs/
+
+  - name: Log in to Docker Hub
+    docker_login:
+      username: your-docker_hub_username
+      password: your-docker_hub_password
+      registry_url: https://index.docker.io/v2/
+
+  - name: Print Docker Hub login status
+    debug:
+      msg: "Docker Hub login successful!"
+
+  - name: Change Directory to Simple-crud-react-nodejs/frontend
+    shell: cd /home/saurabhadhau/Desktop/P-2/simple-crud-react-nodejs/frontend/
+
+  - name: Build Frontend Docker Image
+    shell: docker build -t frontend-image-777  .
+
+    args:
+      chdir: /home/saurabhadhau/Desktop/P-2/simple-crud-react-nodejs/frontend/
+
+  - name: Tag Frontend Docker Image
+    shell: docker tag frontend-image-777 nacromancer858/frontend-image-777:"{{ image_tags.frontend_tag }}"
+    args:
+      chdir: /home/saurabhadhau/Desktop/P-2/simple-crud-react-nodejs/frontend/
+
+  - name: Push Frontend Docker Image
+    shell: docker push nacromancer858/frontend-image-777:"{{ image_tags.frontend_tag }}"
+    args:
+      chdir: /home/saurabhadhau/Desktop/P-2/simple-crud-react-nodejs/frontend/
+
+  - name: Change Directory to Simple-crud-react-nodejs/backend
+    shell: cd /home/saurabhadhau/Desktop/P-2/simple-crud-react-nodejs/backend/
+
+  - name: Build Backend Docker Image
+    shell: |
+      docker build -t nacromancer858/backend-image -f Dockerfile .
+      docker tag nacromancer858/backend-image nacromancer858/backend-image:"{{ image_tags.backend_tag }}"
+      docker push nacromancer858/backend-image:"{{ image_tags.backend_tag }}"
+    args:
+      chdir: /home/saurabhadhau/Desktop/P-2/simple-crud-react-nodejs/backend/
+
+
+- name: Install and configure Kubernetes with Minikube
+  hosts: localhost
+  connection: local
+  tasks:
+  - name: Start Minikube
+    command: minikube start
+
+  - name: Check Minikube status
+    command: minikube status
+
+  - name: Install helm
+    shell: |
+      curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+      chmod 700 get_helm.sh
+      ./get_helm.sh
+
+- name: Pulling the Images and Install Helm
+  hosts: localhost
+  connection: local
+  tasks:
+  - name: Pull frontend Docker image
+    docker_image:
+      name: nacromancer858/frontend-image-777
+      tag: "{{ image_tags.frontend_tag }}"
+      source: pull
+
+  - name: Pull backend Docker image
+    docker_image:
+      name: nacromancer858/backend-image
+      tag: "{{ image_tags.backend_tag }}"
+      source: pull
+
+  - name: Change Directory to Helm-charts
+    shell: cd /home/saurabhadhau/Desktop/P-2/helm-v1/
+
+- name: Update frontend values file
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+  - name: Read inventory file
+    include_vars:
+      file: inventory.yml
+      name: inventory_data
+
+  - name: Update frontend tag value
+    lineinfile:
+      path: helm-v1/values.frontend.yml
+      regexp: '^frontend:\n[[:space:]]*tag:'
+      line: 'frontend:\n  tag: "{{ inventory_data.image_tags.frontend_tag }}"'
+
+  - name: Update Backend tag value
+    lineinfile:
+      path: helm-v1/values.backend.yml
+      regexp: '^backend:\n[[:space:]]*tag:'
+      line: 'backend:\n  tag: "{{ inventory_data.image_tags.backend_tag }}"'
+
+  - name: Build Helm-Chart for Frontend
+    shell: helm install frontend ./frontend-chart -f values.frontend.yml
+    args:
+      chdir: /home/saurabhadhau/Desktop/P-2/helm-v1/
+
+  - name: Build Helm-Chart for Backend
+    shell: helm install backend ./backend-chart -f values.backend.yml
+    args:
+      chdir: /home/saurabhadhau/Desktop/P-2/helm-v1/

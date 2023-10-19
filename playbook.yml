@@ -89,7 +89,7 @@
 
   - name: Log in to Docker Hub
     docker_login:
-      username: your-docker_hub_username
+      username: nacromancer858  #you should use your docker hub username
       password: your-docker_hub_password
       registry_url: https://index.docker.io/v2/
 
